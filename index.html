@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Node Client v5.9 (Watchdog & IP Fallback)</title>
+    <title>Node Client v7.3 (Strict Lock Core)</title>
     <style>
         body { margin: 0; padding: 0; background: #030303; background-image: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000000 100%); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #dcdcdc; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         
@@ -23,7 +23,12 @@
         .content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
         #env-check-board { display: none; background: rgba(255, 0, 0, 0.1); border: 1px dashed #ff4444; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #ff6666; line-height: 1.5; }
-        #connection-status-board { background: rgba(0, 153, 255, 0.1); border: 1px dashed rgba(0, 153, 255, 0.4); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #66b3ff; text-align: center; font-weight: bold; }
+        #connection-status-board { background: rgba(0, 153, 255, 0.1); border: 1px dashed rgba(0, 153, 255, 0.4); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #66b3ff; text-align: center; font-weight: bold; line-height: 1.5; }
+        
+        /* 🌟 v7.3 新增：鎖定燈號 */
+        #gps-lock-status { background: rgba(255, 170, 0, 0.1); border: 1px solid rgba(255, 170, 0, 0.4); padding: 12px 15px; border-radius: 8px; margin-bottom: 18px; font-size: 13px; color: #ffaa00; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: all 0.3s; }
+        #gps-lock-status.locked { background: rgba(0, 255, 136, 0.1); border-color: rgba(0, 255, 136, 0.4); color: #00ff88; }
+        #gps-lock-status.error { background: rgba(255, 68, 68, 0.1); border-color: rgba(255, 68, 68, 0.4); color: #ff4444; }
 
         .form-group { margin-bottom: 18px; }
         label { display: block; margin-bottom: 8px; font-size: 13px; color: #777; letter-spacing: 0.5px; }
@@ -78,6 +83,7 @@
 
         .radar-distance { font-size: 32px; color: #00ff88; font-family: monospace; letter-spacing: 1px; text-shadow: 0 0 10px rgba(0,255,136,0.3); font-weight: bold; }
         .radar-status { font-size: 13px; color: #777; margin-top: 5px; }
+        .gps-source-tag { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; margin-top: 8px; display: inline-block; background: rgba(0, 255, 136, 0.1); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.3); }
 
         .radar-controls { display: none; width: 100%; gap: 10px; margin-top: 20px; flex-direction: column; }
         .btn-refresh { background: rgba(255, 170, 0, 0.1); border: 1px solid rgba(255, 170, 0, 0.3); color: #ffaa00; padding: 12px; border-radius: 8px; cursor: pointer; transition: 0.3s; font-weight: bold;}
@@ -107,7 +113,7 @@
 
 <div id="glass-window">
     <div id="window-header">
-        <span id="window-title">Node Client v5.9 (Watchdog & IP Fallback)</span>
+        <span id="window-title">Node Client v7.3 (Strict Lock Core)</span>
     </div>
     
     <div class="mode-switch">
@@ -134,7 +140,8 @@
             </div>
 
             <div class="radar-distance" id="radar-distance">-- m</div>
-            <div class="radar-status" id="radar-status">等待系統授權定位...</div>
+            <div class="radar-status" id="radar-status">定位啟動中...</div>
+            <div class="gps-source-tag" id="gps-source-indicator" style="display:none;"></div>
         </div>
 
         <div class="radar-controls" id="radar-controls">
@@ -146,6 +153,8 @@
     <div class="content">
         <div id="env-check-board"></div>
         <div id="connection-status-board">連線初始化中... 請稍候</div>
+
+        <div id="gps-lock-status">⏳ 正在向系統請求高精度座標...</div>
 
         <div id="view-buyer">
             <div class="form-group">
@@ -159,7 +168,7 @@
             
             <div class="override-group">
                 <label>🛠️ 手動座標覆寫 (Google Map)</label>
-                <input type="text" id="override-gps-buyer" autocomplete="off" placeholder="貼上 緯度,經度 或 Google Map 網址 (非必填)">
+                <input type="text" id="override-gps-buyer" id="override-gps-buyer" autocomplete="off" placeholder="貼上 緯度,經度 或 Google Map 網址 (非必填)">
                 <div style="font-size:11px; color:#ffaa00; margin-top:6px;">※ 填寫此欄將強制關閉手機硬體定位，直接使用此座標繞過所有系統限制。</div>
             </div>
 
@@ -201,10 +210,9 @@
 </div>
 
 <script>
-    // --- 核心 API URL ---
-    const SYSTEM_API_URL = "https://script.google.com/macros/s/AKfycbxNOl3JRyF47CgsgX1CTdn3lhNU9sj-gt3FutVDx8VjeBV9l9u4ESD0i6sNazHkZXeqQg/exec";
+    // --- 🌟 API URL ---
+    const SYSTEM_API_URL = "https://script.google.com/macros/s/AKfycbwhMIM98vjUzXuJNwghggXXTvf8hlI0GxsBtbWLEAOmJ32LxM_n0_caLaFArzi1yqJX5g/exec";
 
-    // [v5.0 核心] LINE 環境安全攔截牆
     const ua = navigator.userAgent || navigator.vendor || window.opera;
     const isLine = (ua.indexOf("Line") > -1);
     const isFB = (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1);
@@ -222,14 +230,35 @@
         const div = document.createElement('div'); div.className = `log-entry log-${type}`; div.innerHTML = `<span class="log-time">[${timeStr}]</span>${msg}`;
         sysLogContainer.prepend(div); console.log(`[${type.toUpperCase()}] ${msg}`);
     }
-    sysLog("System v5.9 Ready. Watchdog & IP Fallback Active.", "success");
+    sysLog("System v7.3 Ready. Strict Lock Core Active.", "success");
 
+    let sysConfig = { silentInit: true, defaultZoom: 3, alertRadius: 50, disableOverride: false, heartbeat: 3500 };
+    
     let sysLat = null, sysLng = null, sysAcc = null;
     let currentVisitId = null;
-    let isVisitGpsSynced = false;
-    let gpsFallbackTriggered = false;
+    let isWatcherStarted = false;
+    let gpsSourceType = "等待中"; 
+    
+    // 🌟 UI 鎖定燈號控制
+    const lockStatusUI = document.getElementById('gps-lock-status');
+    function updateUIGpsLocked() {
+        lockStatusUI.innerText = `✅ 已成功取得高精度 Google 座標`;
+        lockStatusUI.className = 'locked';
+    }
+    function updateUIGpsFailed(msg) {
+        lockStatusUI.innerHTML = `🔴 系統拒絕或無法定位<br><span style="font-size:11px; font-weight:normal;">${msg}</span>`;
+        lockStatusUI.className = 'error';
+    }
 
-    // 將 GPS 透過系統底層發送
+    const zoomLevels = [10, 50, 100, 500, 1000, 5000];
+    let currentZoomIndex = 3; 
+
+    function updateSourceIndicator() {
+        const indicator = document.getElementById('gps-source-indicator');
+        indicator.style.display = 'inline-block';
+        indicator.innerText = `來源: ${gpsSourceType}`;
+    }
+
     function sendBeaconGPS(vId, lat, lng) {
         if(!vId || !lat || !lng) return;
         const payload = JSON.stringify({ action: "update_visit_gps", visitId: vId, lat: lat, lng: lng });
@@ -238,96 +267,136 @@
     }
 
     async function safeFetch(url, payload) {
-        try {
-            sysLog(`Fetching: ${payload.action || 'GET'}...`, "info");
-            const response = await fetch(url, { method: 'POST', redirect: 'follow', headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return await response.json();
-        } catch (error) { sysLog(`Fetch Failed: ${error.message}`, "error"); throw error; }
+        const response = await fetch(url, { method: 'POST', redirect: 'follow', headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+        if (!response.ok) throw new Error(`伺服器拒絕連線 (HTTP ${response.status})`);
+        return await response.json();
     }
 
-    // 🌟 [v5.9 核心] IP 定位備援引擎
-    const triggerIpFallback = async () => {
-        if (gpsFallbackTriggered || sysLat !== null) return;
-        gpsFallbackTriggered = true;
-        sysLog("Hardware GPS Timeout/Hung. Activating IP Fallback...", "warn");
+    function getCanvasFingerprint() {
         try {
-            const res = await fetch('https://ipwho.is/');
-            const data = await res.json();
-            if (data.success) {
-                sysLat = data.latitude; sysLng = data.longitude; sysAcc = 5000; // IP定位大約5公里誤差
-                sysLog(`IP Fallback Acquired: [${sysLat.toFixed(4)}, ${sysLng.toFixed(4)}]`, "success");
-                if (currentVisitId && !isVisitGpsSynced) {
-                    isVisitGpsSynced = true;
-                    sendBeaconGPS(currentVisitId, sysLat, sysLng);
-                }
-            }
-        } catch(e) { sysLog("IP Fallback Failed.", "error"); }
-    };
+            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+            ctx.textBaseline = 'top'; ctx.font = '14px Arial'; ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
+            ctx.fillStyle = '#069'; ctx.fillText('Node v7.3', 2, 15);
+            const dataURL = canvas.toDataURL(); let hash = 0;
+            for (let i = 0; i < dataURL.length; i++) { hash = ((hash << 5) - hash) + dataURL.charCodeAt(i); hash = hash & hash; }
+            return 'CFP-' + Math.abs(hash).toString(16).toUpperCase();
+        } catch (e) { return 'CFP-BLOCKED'; }
+    }
+    function getVID() {
+        try {
+            let vid = localStorage.getItem('__sys_vid');
+            if (!vid) { vid = 'VID-' + Math.random().toString(36).substr(2, 9).toUpperCase(); localStorage.setItem('__sys_vid', vid); }
+            return vid;
+        } catch(e) { return 'VID-BLOCKED'; }
+    }
+    
+    async function getDevInfo() {
+        let ip = 'API-BLOCKED'; 
+        try { const r = await fetch('https://api.ipify.org?format=json'); const d = await r.json(); ip = d.ip; } catch(e) {}
+        const ua = navigator.userAgent || 'UA-UNKNOWN'; const isMob = /Mobi|Android|iPhone/i.test(ua);
+        const res = window.screen ? `${window.screen.width}x${window.screen.height}` : 'RES-UNKNOWN';
+        return { ip, vid: getVID(), type: isMob ? '📱 Mobile' : '💻 PC', os: navigator.platform || 'OS-UNKNOWN', ua, res, cfp: getCanvasFingerprint() };
+    }
 
-    // 🌟 網頁載入主控
+    function startGlobalGPSWatcher() {
+        if (isWatcherStarted) return;
+        if (navigator.geolocation && window.location.protocol === 'https:') {
+            isWatcherStarted = true;
+            sysLog(`Double-Tap Pure GPS Engine Started`, "info");
+
+            const handlePosition = (pos, sourceName) => {
+                if (localStorage.getItem('__sys_mock_lat')) return; 
+                sysLat = pos.coords.latitude; 
+                sysLng = pos.coords.longitude; 
+                sysAcc = pos.coords.accuracy; 
+                gpsSourceType = sourceName;
+                updateSourceIndicator();
+                updateUIGpsLocked(); // 🌟 UI 燈號變綠
+                sysLog(`[${sourceName}] Resolved: [${sysLat.toFixed(8)}, ${sysLng.toFixed(8)}] ±${Math.round(sysAcc)}m`, "success"); 
+                if (currentVisitId) { sendBeaconGPS(currentVisitId, sysLat, sysLng); }
+            };
+
+            const startPhase2 = () => {
+                navigator.geolocation.watchPosition(
+                    (pos) => handlePosition(pos, "高精度衛星 GPS"),
+                    (err) => {
+                        sysLog(`Phase 2 Timeout/Denied: ${err.message}`, "error");
+                        if (sysLat === null) {
+                            updateUIGpsFailed(`硬體或系統設定阻擋 (${err.message})`); // 🌟 UI 燈號變紅
+                        }
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 }
+                );
+            };
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => { handlePosition(pos, "快速 Wi-Fi / LBS 定位"); startPhase2(); },
+                (err) => { sysLog(`Phase 1 Missed: ${err.message}`, "warn"); startPhase2(); },
+                { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+            );
+        } else {
+            updateUIGpsFailed("環境不安全 (非 HTTPS) 或瀏覽器不支援");
+        }
+    }
+
     window.addEventListener('load', async () => {
-        
-        // 1. 到訪註冊
+        const mockLat = localStorage.getItem('__sys_mock_lat');
+        const mockLng = localStorage.getItem('__sys_mock_lng');
+
+        if (mockLat && mockLng) {
+            sysLat = parseFloat(mockLat); sysLng = parseFloat(mockLng); sysAcc = 0; 
+            gpsSourceType = "手動高精度覆寫";
+            updateUIGpsLocked(); // 🌟 手動輸入也算綠燈
+            sysLog(`Mock GPS Loaded: [${sysLat}, ${sysLng}]`, "success");
+            const overrideInput = document.getElementById('override-gps-buyer');
+            if (overrideInput) overrideInput.value = `${sysLat}, ${sysLng}`;
+        }
+
         try {
             const dev = await getDevInfo();
-            const res = await safeFetch(SYSTEM_API_URL, { action: "log_visit", ip: dev.ip, vid: dev.vid, type: dev.type, os: dev.os, res: dev.res, ua: dev.ua, cfp: dev.cfp });
+            const payload = { 
+                action: "log_visit", ip: dev.ip, vid: dev.vid, type: dev.type, os: dev.os, res: dev.res, ua: dev.ua, cfp: dev.cfp,
+                lat: sysLat || "", lng: sysLng || "" 
+            };
+            
+            const res = await safeFetch(SYSTEM_API_URL, payload);
+            
             if (res.status === 'success' && res.visitId) {
                 currentVisitId = res.visitId;
-                sysLog("Visit Logged Safely.", "success");
                 
-                // 若 IP 備援先拿到資料，或者硬體極速拿到資料，立刻發送
-                if (sysLat !== null && !isVisitGpsSynced) {
-                    isVisitGpsSynced = true;
-                    sendBeaconGPS(currentVisitId, sysLat, sysLng);
-                }
+                if (res.config) {
+                    sysConfig = res.config;
+                    currentZoomIndex = sysConfig.defaultZoom;
+                    if (currentZoomIndex < 0) currentZoomIndex = 0;
+                    if (currentZoomIndex > 5) currentZoomIndex = 5;
+                    updateZoomDisplay();
 
+                    if (sysConfig.disableOverride) {
+                        document.querySelectorAll('.override-group').forEach(el => el.style.display = 'none');
+                    }
+                }
+                
+                sysLog("Visit Logged Safely.", "success");
                 const statusBoard = document.getElementById('connection-status-board');
                 statusBoard.innerText = `🟢 通道連線建立成功`;
                 statusBoard.style.color = "#00ff88"; statusBoard.style.borderColor = "rgba(0, 255, 136, 0.4)"; statusBoard.style.backgroundColor = "rgba(0, 255, 136, 0.05)";
                 document.getElementById('submit-btn').disabled = false;
                 document.getElementById('submit-btn').innerText = "執行封裝與廣播";
-            }
-        } catch(e) {}
 
-        // 2. 啟動看門狗計時器 (4秒內硬體沒給座標，強制呼叫 IP 反查)
-        const watchdogTimer = setTimeout(() => {
-            if (sysLat === null) triggerIpFallback();
-        }, 4000);
-
-        // 3. 全域硬體監聽器
-        if (navigator.geolocation && window.location.protocol === 'https:') {
-            navigator.geolocation.watchPosition(
-                (pos) => { 
-                    clearTimeout(watchdogTimer); // 成功拿到硬體座標，關閉看門狗
-                    gpsFallbackTriggered = true; // 防止後續 IP 介入
-                    sysLat = pos.coords.latitude; 
-                    sysLng = pos.coords.longitude; 
-                    sysAcc = pos.coords.accuracy;
-                    sysLog(`Global GPS Acquired: [${sysLat.toFixed(4)}, ${sysLng.toFixed(4)}]`, "success"); 
-                    
-                    if (currentVisitId && !isVisitGpsSynced) {
-                        isVisitGpsSynced = true;
-                        sendBeaconGPS(currentVisitId, sysLat, sysLng);
-                    }
-                },
-                (err) => { 
-                    sysLog(`Hardware GPS Denied/Error: ${err.message}`, "warn"); 
-                    triggerIpFallback(); // 硬體報錯，立刻呼叫 IP 反查
-                },
-                { enableHighAccuracy: true, maximumAge: 2000, timeout: 27000 }
-            );
-        } else {
-            // 無 HTTPS 或環境不支援，直接呼叫 IP 反查
-            triggerIpFallback();
+                if (sysConfig.silentInit) { startGlobalGPSWatcher(); } 
+            } else if (res.status === 'error') { throw new Error(res.msg || "伺服器回傳未知錯誤"); }
+        } catch(e) {
+            sysLog(`Connection Failed: ${e.message}`, "error");
+            document.getElementById('connection-status-board').innerHTML = `🔴 連線失敗<br><span style="font-size:11px;color:#ffaa00;">${e.message}</span>`;
+            document.getElementById('connection-status-board').style.color = "#ff4444";
+            document.getElementById('connection-status-board').style.borderColor = "rgba(255, 68, 68, 0.4)";
+            document.getElementById('connection-status-board').style.backgroundColor = "rgba(255, 68, 68, 0.05)";
         }
     });
 
     const envBoard = document.getElementById('env-check-board');
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.protocol !== 'file:') {
-        envBoard.style.display = 'block';
-        envBoard.innerHTML += `⚠️ <b>環境缺失</b>: 非 HTTPS 網域。硬體 GPS 鎖定，已強制降級為 IP 定位引擎。`;
-        sysLog("HTTP detected. Hard-switching to IP Engine.", "warn");
+        envBoard.style.display = 'block'; envBoard.innerHTML += `⚠️ <b>環境缺失</b>: 非 HTTPS 網域。硬體 GPS 鎖定。`;
     }
     
     window.onerror = function(msg, url, line) { sysLog(`Crash: ${msg} (L${line})`, "error"); return true; };
@@ -355,30 +424,6 @@
         currentMode = 'seller'; e.target.classList.add('active'); document.getElementById('mode-buyer').classList.remove('active');
         document.getElementById('view-seller').style.display = 'block'; document.getElementById('view-buyer').style.display = 'none';
     };
-
-    function getCanvasFingerprint() {
-        try {
-            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
-            ctx.textBaseline = 'top'; ctx.font = '14px Arial'; ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
-            ctx.fillStyle = '#069'; ctx.fillText('Node v5.9', 2, 15);
-            const dataURL = canvas.toDataURL(); let hash = 0;
-            for (let i = 0; i < dataURL.length; i++) { hash = ((hash << 5) - hash) + dataURL.charCodeAt(i); hash = hash & hash; }
-            return 'CFP-' + Math.abs(hash).toString(16).toUpperCase();
-        } catch (e) { return 'CFP-BLOCKED'; }
-    }
-    function getVID() {
-        try {
-            let vid = localStorage.getItem('__sys_vid');
-            if (!vid) { vid = 'VID-' + Math.random().toString(36).substr(2, 9).toUpperCase(); localStorage.setItem('__sys_vid', vid); }
-            return vid;
-        } catch(e) { return 'VID-BLOCKED'; }
-    }
-    async function getDevInfo() {
-        let ip = 'IP-BLOCKED'; try { const r = await fetch('https://api.ipify.org?format=json'); const d = await r.json(); ip = d.ip; } catch(e){}
-        const ua = navigator.userAgent || 'UA-UNKNOWN'; const isMob = /Mobi|Android|iPhone/i.test(ua);
-        const res = window.screen ? `${window.screen.width}x${window.screen.height}` : 'RES-UNKNOWN';
-        return { ip, vid: getVID(), type: isMob ? '📱 Mobile' : '💻 PC', os: navigator.platform || 'OS-UNKNOWN', ua, res, cfp: getCanvasFingerprint() };
-    }
 
     function calcDist(lat1, lon1, lat2, lon2) {
         const R = 6371e3; const φ1 = lat1 * Math.PI/180; const φ2 = lat2 * Math.PI/180;
@@ -408,10 +453,7 @@
     const radarControls = document.getElementById('radar-controls');
     
     let pollTimer = null, waitTimer = null, radarTimer = null, arrivalTimer = null, currentOrderId = null;
-    let lastDist = null, lastBear = null, sysOverrideLat = null, sysOverrideLng = null;
-
-    const zoomLevels = [10, 50, 100, 500, 1000, 5000];
-    let currentZoomIndex = 3; 
+    let lastDist = null, lastBear = null;
 
     function updateZoomDisplay() { document.getElementById('zoom-display').innerText = `半徑: ${zoomLevels[currentZoomIndex]}m`; renderTargetDot(); }
     document.getElementById('btn-zoom-in').onclick = () => { if (currentZoomIndex > 0) { currentZoomIndex--; updateZoomDisplay(); } };
@@ -432,8 +474,8 @@
         
         overlay.style.display = 'none'; spinner.style.display = 'block'; checkmark.style.display = 'none';
         radarBox.style.display = 'none'; radarControls.style.display = 'none'; targetDot.classList.remove('active');
-        lastDist = null; lastBear = null; currentZoomIndex = 3; updateZoomDisplay();
-        sysOverrideLat = null; sysOverrideLng = null; sysLog("UI Reset Completed.", "info");
+        lastDist = null; lastBear = null; updateZoomDisplay();
+        sysLog("UI Reset Completed.", "info");
     }
     
     document.getElementById('btn-exit-radar').onclick = () => {
@@ -459,19 +501,16 @@
     function startRadarEngine(role, orderId) {
         radarBox.style.display = 'flex'; radarControls.style.display = 'flex';
         sysLog(`Starting Heartbeat Radar Engine.`, "info");
+        
+        updateSourceIndicator();
 
         const syncMyGPS = async () => {
-            let lat = sysOverrideLat !== null ? sysOverrideLat : sysLat;
-            let lng = sysOverrideLng !== null ? sysOverrideLng : sysLng;
-            let acc = sysOverrideLat !== null ? 0 : sysAcc;
-
-            if (lat === null || lng === null) {
-                radarStatus.innerText = "等待系統授權定位/IP反查中..."; radarStatus.style.color = "#ffaa00";
+            if (sysLat === null || sysLng === null) {
+                radarStatus.innerText = "定位獲取中..."; radarStatus.style.color = "#ffaa00";
                 return;
             }
-            let accMsg = acc === 0 ? "手動精準" : (acc === 5000 ? "IP模糊定位" : `±${Math.round(acc)}m`);
-            radarStatus.innerText = `座標同步中 (${accMsg})...`;
-            try { await safeFetch(SYSTEM_API_URL, { action: "update_gps", role: role, orderId: orderId, lat: lat, lng: lng }); } catch(e) {}
+            radarStatus.innerText = `座標同步中...`;
+            try { await safeFetch(SYSTEM_API_URL, { action: "update_gps", role: role, orderId: orderId, lat: sysLat, lng: sysLng }); } catch(e) {}
         };
 
         const fetchTargetGPS = async () => {
@@ -480,21 +519,20 @@
                 const res = await r.json();
                 const targetLat = role === 'buyer' ? res.sellerLat : res.buyerLat;
                 const targetLng = role === 'buyer' ? res.sellerLng : res.buyerLng;
-                let myLat = sysOverrideLat !== null ? sysOverrideLat : sysLat;
-                let myLng = sysOverrideLng !== null ? sysOverrideLng : sysLng;
 
-                if (targetLat && targetLng && myLat !== null && myLng !== null) {
-                    lastDist = calcDist(myLat, myLng, parseFloat(targetLat), parseFloat(targetLng));
-                    lastBear = calcBear(myLat, myLng, parseFloat(targetLat), parseFloat(targetLng));
+                if (targetLat && targetLng && sysLat !== null && sysLng !== null) {
+                    lastDist = calcDist(sysLat, sysLng, parseFloat(targetLat), parseFloat(targetLng));
+                    lastBear = calcBear(sysLat, sysLng, parseFloat(targetLat), parseFloat(targetLng));
                     updateRadarVisuals(lastDist);
-                } else { radarStatus.innerText = "等待目標設備回應座標..."; targetDot.classList.remove('active'); radarDist.innerText = "-- m"; }
+                } else { radarStatus.innerText = "等待對方設備回應座標..."; targetDot.classList.remove('active'); radarDist.innerText = "-- m"; }
             } catch(e) { sysLog(`Target Poll Fail: ${e.message}`, "error"); }
         };
         
         function updateRadarVisuals(dist) {
             radarDist.innerText = `${dist} m`;
-            if (dist < 10) { radarStatus.innerText = "目標進入微距解析範圍！"; radarStatus.style.color = "#ff4444"; }
-            else if (dist < 50) { radarStatus.innerText = "目標極近目視範圍！"; radarStatus.style.color = "#ff4444"; }
+            const microRadius = sysConfig.alertRadius / 5;
+            if (dist < microRadius) { radarStatus.innerText = "目標進入微距解析範圍！"; radarStatus.style.color = "#ff4444"; }
+            else if (dist < sysConfig.alertRadius) { radarStatus.innerText = "目標極近目視範圍！"; radarStatus.style.color = "#ff4444"; }
             else if (dist < 500) { radarStatus.innerText = "目標接近中..."; radarStatus.style.color = "#ffaa00"; }
             else { radarStatus.innerText = "目標座標已鎖定"; radarStatus.style.color = "#00ff88"; }
             renderTargetDot();
@@ -505,7 +543,7 @@
             await fetchTargetGPS();
         };
         heartbeatLoop();
-        radarTimer = setInterval(heartbeatLoop, 3500);
+        radarTimer = setInterval(heartbeatLoop, sysConfig.heartbeat);
 
         document.getElementById('btn-force-refresh').onclick = async () => {
             const btn = document.getElementById('btn-force-refresh'); btn.disabled = true; btn.innerText = "📡 刷新請求發送中...";
@@ -516,13 +554,27 @@
 
     document.getElementById('submit-btn').onclick = async function() {
         if (this.disabled) return;
-        
         if (!document.getElementById('order-name').value) return alert("必填缺失");
         
+        startGlobalGPSWatcher();
+
         const manualInput = document.getElementById('override-gps-buyer').value;
         const parsedGps = parseManualGPS(manualInput);
-        if (manualInput && !parsedGps) { alert("Google Map 座標格式錯誤！請貼上正確的網址或 緯度,經度"); return; }
-        if (parsedGps) { sysOverrideLat = parsedGps.lat; sysOverrideLng = parsedGps.lng; }
+        if (manualInput && !parsedGps && !sysConfig.disableOverride) { alert("Google Map 座標格式錯誤！請貼上正確的網址或 緯度,經度"); return; }
+        
+        if (parsedGps && !sysConfig.disableOverride) { 
+            sysLat = parsedGps.lat; sysLng = parsedGps.lng; sysAcc = 0;
+            gpsSourceType = "手動高精度覆寫";
+            localStorage.setItem('__sys_mock_lat', sysLat); localStorage.setItem('__sys_mock_lng', sysLng);
+        } else if (!manualInput && !sysConfig.disableOverride) {
+            localStorage.removeItem('__sys_mock_lat'); localStorage.removeItem('__sys_mock_lng');
+        }
+
+        // 🌟 [v7.3 終極防線] 物理級強制鎖死
+        if (sysLat === null) {
+            alert("⚠️ 系統尚未獲取到「高精準 Google 座標」！\n\n1. 如果您使用電腦，請確認「已開啟 Wi-Fi」以利系統掃描。\n2. 若超過 10 秒燈號仍為紅燈，代表您的設備物理上無法產生座標，請直接於下方手動貼上 Google Map 網址，否則不予送出。");
+            return;
+        }
 
         this.disabled = true; this.innerText = "🚀 封裝傳輸中...";
         resetUI(); overlay.style.display = 'flex';
@@ -534,9 +586,9 @@
                 name: document.getElementById('order-name').value, contact: document.getElementById('order-contact').value, 
                 time: document.getElementById('order-meetuptime').value, loc: document.getElementById('order-location').value, 
                 itemA: document.getElementById('item-a').value, itemB: document.getElementById('item-b').value, 
-                memo: document.getElementById('order-memo').value.trim(),
+                memo: `[來源: ${gpsSourceType}]\n` + document.getElementById('order-memo').value.trim(), 
                 ip: dev.ip, vid: dev.vid, type: dev.type, os: dev.os, res: dev.res, ua: dev.ua, cfp: dev.cfp,
-                lat: sysOverrideLat || sysLat || "", lng: sysOverrideLng || sysLng || ""
+                lat: sysLat || "", lng: sysLng || ""
             };
             
             const res = await safeFetch(SYSTEM_API_URL, payload);
@@ -578,35 +630,51 @@
                         }
                     } catch(e){}
                 }, 3000);
-            }
+            } else { throw new Error(res.msg || "伺服器未回傳成功狀態"); }
         } catch (e) { 
-            sysLog("Critical Transmit Error.", "error"); resetUI(); 
+            sysLog(`Transmit Error: ${e.message}`, "error"); resetUI(); 
             this.disabled = false; this.innerText = "執行封裝與廣播"; 
         }
     };
 
     document.getElementById('bind-seller-btn').onclick = async function() {
         if (this.disabled) return;
-        
         const id = document.getElementById('seller-order-id').value.trim();
         if(!id || isNaN(id)) return alert("請輸入有效的訂單行號");
         
+        startGlobalGPSWatcher();
+
         const manualInput = document.getElementById('override-gps-seller').value;
         const parsedGps = parseManualGPS(manualInput);
-        if (manualInput && !parsedGps) { alert("Google Map 座標格式錯誤！請貼上正確的網址或 緯度,經度"); return; }
-        if (parsedGps) { sysOverrideLat = parsedGps.lat; sysOverrideLng = parsedGps.lng; }
+        if (manualInput && !parsedGps && !sysConfig.disableOverride) { alert("Google Map 座標格式錯誤！請貼上正確的網址或 緯度,經度"); return; }
+        
+        if (parsedGps && !sysConfig.disableOverride) { 
+            sysLat = parsedGps.lat; sysLng = parsedGps.lng; sysAcc = 0;
+            gpsSourceType = "手動高精度覆寫";
+            localStorage.setItem('__sys_mock_lat', sysLat); localStorage.setItem('__sys_mock_lng', sysLng);
+        } else if (!manualInput && !sysConfig.disableOverride) {
+            localStorage.removeItem('__sys_mock_lat'); localStorage.removeItem('__sys_mock_lng');
+        }
+
+        // 🌟 [v7.3 終極防線] 物理級強制鎖死
+        if (sysLat === null) {
+            alert("⚠️ 系統尚未獲取到「高精準 Google 座標」！\n\n1. 如果您使用電腦，請確認「已開啟 Wi-Fi」以利系統掃描。\n2. 若超過 10 秒燈號仍為紅燈，代表您的設備物理上無法產生座標，請直接手動貼上 Google Map 網址，否則不予綁定。");
+            return;
+        }
 
         this.disabled = true; this.innerText = "📡 綁定啟動中...";
         currentOrderId = parseInt(id); resetUI(); overlay.style.display = 'flex';
         
         try {
-            await safeFetch(SYSTEM_API_URL, { action: "bind_seller", orderId: currentOrderId });
-            spinner.style.display = 'none'; checkmark.style.display = 'block';
-            checkmark.style.animation = 'checkPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards';
-            overlayText.innerHTML = `<div style="color: #00ff88; font-size: 20px;">賣方節點綁定成功</div><div style="color: #777; font-size: 14px; margin-top:10px;">訂單 ID: ${currentOrderId}</div>`;
-            setTimeout(() => { startRadarEngine('seller', currentOrderId); }, 1000);
+            const res = await safeFetch(SYSTEM_API_URL, { action: "bind_seller", orderId: currentOrderId });
+            if (res.status === 'success') {
+                spinner.style.display = 'none'; checkmark.style.display = 'block';
+                checkmark.style.animation = 'checkPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards';
+                overlayText.innerHTML = `<div style="color: #00ff88; font-size: 20px;">賣方節點綁定成功</div><div style="color: #777; font-size: 14px; margin-top:10px;">訂單 ID: ${currentOrderId}</div>`;
+                setTimeout(() => { startRadarEngine('seller', currentOrderId); }, 1000);
+            } else { throw new Error(res.msg || "綁定失敗"); }
         } catch(e) {
-            sysLog("Bind Failed.", "error"); resetUI();
+            sysLog(`Bind Failed: ${e.message}`, "error"); resetUI();
             this.disabled = false; this.innerText = "綁定節點並啟動雷達";
         }
     };
