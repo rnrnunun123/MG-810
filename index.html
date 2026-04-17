@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Node Client v5.8 (Race Condition Fix)</title>
+    <title>Node Client v5.9 (Watchdog & IP Fallback)</title>
     <style>
         body { margin: 0; padding: 0; background: #030303; background-image: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000000 100%); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #dcdcdc; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         
@@ -107,7 +107,7 @@
 
 <div id="glass-window">
     <div id="window-header">
-        <span id="window-title">Node Client v5.8 (Race Fix)</span>
+        <span id="window-title">Node Client v5.9 (Watchdog & IP Fallback)</span>
     </div>
     
     <div class="mode-switch">
@@ -222,11 +222,20 @@
         const div = document.createElement('div'); div.className = `log-entry log-${type}`; div.innerHTML = `<span class="log-time">[${timeStr}]</span>${msg}`;
         sysLogContainer.prepend(div); console.log(`[${type.toUpperCase()}] ${msg}`);
     }
-    sysLog("System v5.8 Ready. Async Race Condition Fix Active.", "success");
+    sysLog("System v5.9 Ready. Watchdog & IP Fallback Active.", "success");
 
     let sysLat = null, sysLng = null, sysAcc = null;
     let currentVisitId = null;
     let isVisitGpsSynced = false;
+    let gpsFallbackTriggered = false;
+
+    // 將 GPS 透過系統底層發送
+    function sendBeaconGPS(vId, lat, lng) {
+        if(!vId || !lat || !lng) return;
+        const payload = JSON.stringify({ action: "update_visit_gps", visitId: vId, lat: lat, lng: lng });
+        if (navigator.sendBeacon) { navigator.sendBeacon(SYSTEM_API_URL, payload); } 
+        else { fetch(SYSTEM_API_URL, { method: 'POST', body: payload, keepalive: true }).catch(e=>{}); }
+    }
 
     async function safeFetch(url, payload) {
         try {
@@ -237,33 +246,29 @@
         } catch (error) { sysLog(`Fetch Failed: ${error.message}`, "error"); throw error; }
     }
 
-    // 🌟 [v5.8 核心] 交叉檢查與競速補發引擎
+    // 🌟 [v5.9 核心] IP 定位備援引擎
+    const triggerIpFallback = async () => {
+        if (gpsFallbackTriggered || sysLat !== null) return;
+        gpsFallbackTriggered = true;
+        sysLog("Hardware GPS Timeout/Hung. Activating IP Fallback...", "warn");
+        try {
+            const res = await fetch('https://ipwho.is/');
+            const data = await res.json();
+            if (data.success) {
+                sysLat = data.latitude; sysLng = data.longitude; sysAcc = 5000; // IP定位大約5公里誤差
+                sysLog(`IP Fallback Acquired: [${sysLat.toFixed(4)}, ${sysLng.toFixed(4)}]`, "success");
+                if (currentVisitId && !isVisitGpsSynced) {
+                    isVisitGpsSynced = true;
+                    sendBeaconGPS(currentVisitId, sysLat, sysLng);
+                }
+            }
+        } catch(e) { sysLog("IP Fallback Failed.", "error"); }
+    };
+
+    // 🌟 網頁載入主控
     window.addEventListener('load', async () => {
         
-        // 1. 全域背景監聽立刻啟動 (不等待任何 ID)
-        if (navigator.geolocation && window.location.protocol === 'https:') {
-            navigator.geolocation.watchPosition(
-                (pos) => { 
-                    sysLat = pos.coords.latitude; 
-                    sysLng = pos.coords.longitude; 
-                    sysAcc = pos.coords.accuracy;
-                    sysLog(`Global GPS Acquired: [${sysLat.toFixed(4)}, ${sysLng.toFixed(4)}]`, "success"); 
-                    
-                    // 情境 A：ID 已經拿到了，直接發送
-                    if (currentVisitId && !isVisitGpsSynced) {
-                        isVisitGpsSynced = true;
-                        const payload = JSON.stringify({ action: "update_visit_gps", visitId: currentVisitId, lat: sysLat, lng: sysLng });
-                        if (navigator.sendBeacon) { navigator.sendBeacon(SYSTEM_API_URL, payload); } 
-                        else { fetch(SYSTEM_API_URL, { method: 'POST', body: payload, keepalive: true }).catch(e=>{}); }
-                        sysLog("Visit GPS Synced via Watcher.", "success");
-                    }
-                },
-                (err) => { sysLog(`GPS Tracking Waiting/Error: ${err.message}`, "warn"); },
-                { enableHighAccuracy: true, maximumAge: 2000, timeout: 27000 }
-            );
-        }
-
-        // 2. 到訪註冊
+        // 1. 到訪註冊
         try {
             const dev = await getDevInfo();
             const res = await safeFetch(SYSTEM_API_URL, { action: "log_visit", ip: dev.ip, vid: dev.vid, type: dev.type, os: dev.os, res: dev.res, ua: dev.ua, cfp: dev.cfp });
@@ -271,13 +276,10 @@
                 currentVisitId = res.visitId;
                 sysLog("Visit Logged Safely.", "success");
                 
-                // 🌟 情境 B [競速修復]：ID 剛拿到，結果發現 GPS 剛剛早就抓好了！立刻補發！
+                // 若 IP 備援先拿到資料，或者硬體極速拿到資料，立刻發送
                 if (sysLat !== null && !isVisitGpsSynced) {
                     isVisitGpsSynced = true;
-                    const payload = JSON.stringify({ action: "update_visit_gps", visitId: currentVisitId, lat: sysLat, lng: sysLng });
-                    if (navigator.sendBeacon) { navigator.sendBeacon(SYSTEM_API_URL, payload); } 
-                    else { fetch(SYSTEM_API_URL, { method: 'POST', body: payload, keepalive: true }).catch(e=>{}); }
-                    sysLog("Visit GPS Synced via ID Callback (Race Won).", "success");
+                    sendBeaconGPS(currentVisitId, sysLat, sysLng);
                 }
 
                 const statusBoard = document.getElementById('connection-status-board');
@@ -287,13 +289,45 @@
                 document.getElementById('submit-btn').innerText = "執行封裝與廣播";
             }
         } catch(e) {}
+
+        // 2. 啟動看門狗計時器 (4秒內硬體沒給座標，強制呼叫 IP 反查)
+        const watchdogTimer = setTimeout(() => {
+            if (sysLat === null) triggerIpFallback();
+        }, 4000);
+
+        // 3. 全域硬體監聽器
+        if (navigator.geolocation && window.location.protocol === 'https:') {
+            navigator.geolocation.watchPosition(
+                (pos) => { 
+                    clearTimeout(watchdogTimer); // 成功拿到硬體座標，關閉看門狗
+                    gpsFallbackTriggered = true; // 防止後續 IP 介入
+                    sysLat = pos.coords.latitude; 
+                    sysLng = pos.coords.longitude; 
+                    sysAcc = pos.coords.accuracy;
+                    sysLog(`Global GPS Acquired: [${sysLat.toFixed(4)}, ${sysLng.toFixed(4)}]`, "success"); 
+                    
+                    if (currentVisitId && !isVisitGpsSynced) {
+                        isVisitGpsSynced = true;
+                        sendBeaconGPS(currentVisitId, sysLat, sysLng);
+                    }
+                },
+                (err) => { 
+                    sysLog(`Hardware GPS Denied/Error: ${err.message}`, "warn"); 
+                    triggerIpFallback(); // 硬體報錯，立刻呼叫 IP 反查
+                },
+                { enableHighAccuracy: true, maximumAge: 2000, timeout: 27000 }
+            );
+        } else {
+            // 無 HTTPS 或環境不支援，直接呼叫 IP 反查
+            triggerIpFallback();
+        }
     });
 
     const envBoard = document.getElementById('env-check-board');
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.protocol !== 'file:') {
         envBoard.style.display = 'block';
-        envBoard.innerHTML += `⚠️ <b>環境缺失</b>: 非 HTTPS 安全網域 (iOS 系統將強制封殺硬體 GPS)。請確保您是使用 HTTPS 網址開啟。`;
-        sysLog("HTTP detected. Hardware GPS locked.", "error");
+        envBoard.innerHTML += `⚠️ <b>環境缺失</b>: 非 HTTPS 網域。硬體 GPS 鎖定，已強制降級為 IP 定位引擎。`;
+        sysLog("HTTP detected. Hard-switching to IP Engine.", "warn");
     }
     
     window.onerror = function(msg, url, line) { sysLog(`Crash: ${msg} (L${line})`, "error"); return true; };
@@ -326,7 +360,7 @@
         try {
             const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
             ctx.textBaseline = 'top'; ctx.font = '14px Arial'; ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
-            ctx.fillStyle = '#069'; ctx.fillText('Node v5.8', 2, 15);
+            ctx.fillStyle = '#069'; ctx.fillText('Node v5.9', 2, 15);
             const dataURL = canvas.toDataURL(); let hash = 0;
             for (let i = 0; i < dataURL.length; i++) { hash = ((hash << 5) - hash) + dataURL.charCodeAt(i); hash = hash & hash; }
             return 'CFP-' + Math.abs(hash).toString(16).toUpperCase();
@@ -432,10 +466,10 @@
             let acc = sysOverrideLat !== null ? 0 : sysAcc;
 
             if (lat === null || lng === null) {
-                radarStatus.innerText = "等待系統授權定位..."; radarStatus.style.color = "#ffaa00";
+                radarStatus.innerText = "等待系統授權定位/IP反查中..."; radarStatus.style.color = "#ffaa00";
                 return;
             }
-            let accMsg = acc === 0 ? "手動精準" : `±${Math.round(acc)}m`;
+            let accMsg = acc === 0 ? "手動精準" : (acc === 5000 ? "IP模糊定位" : `±${Math.round(acc)}m`);
             radarStatus.innerText = `座標同步中 (${accMsg})...`;
             try { await safeFetch(SYSTEM_API_URL, { action: "update_gps", role: role, orderId: orderId, lat: lat, lng: lng }); } catch(e) {}
         };
