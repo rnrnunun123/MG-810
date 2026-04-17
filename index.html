@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Node Client v7.5 (Ethernet Rescue Core)</title>
+    <title>Node Client v7.6 (Tactical Radar Core)</title>
     <style>
         body { margin: 0; padding: 0; background: #030303; background-image: radial-gradient(circle at 50% 50%, #0a0a0a 0%, #000000 100%); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #dcdcdc; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         
@@ -23,7 +23,7 @@
         .content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
         #env-check-board { display: none; background: rgba(255, 0, 0, 0.1); border: 1px dashed #ff4444; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #ff6666; line-height: 1.5; }
-        #connection-status-board { background: rgba(0, 153, 255, 0.1); border: 1px dashed rgba(0, 153, 255, 0.4); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #66b3ff; text-align: center; font-weight: bold; line-height: 1.5; }
+        #connection-status-board { background: rgba(0, 153, 255, 0.1); border: 1px dashed rgba(0, 153, 255, 0.4); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; color: #66b3ff; text-align: center; font-weight: bold; line-height: 1.5; transition: all 0.3s;}
         
         #gps-lock-status { background: rgba(255, 170, 0, 0.1); border: 1px solid rgba(255, 170, 0, 0.4); padding: 12px 15px; border-radius: 8px; margin-bottom: 18px; font-size: 13px; color: #ffaa00; display: flex; align-items: center; justify-content: center; font-weight: bold; transition: all 0.3s; }
         #gps-lock-status.locked { background: rgba(0, 255, 136, 0.1); border-color: rgba(0, 255, 136, 0.4); color: #00ff88; }
@@ -71,21 +71,32 @@
         #overlay-text { font-size: 16px; color: #ccc; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
         .highlight-time { color: #00ff88; font-size: 38px; font-weight: 900; margin: 5px 0; text-shadow: 0 0 15px rgba(0,255,136,0.4); font-variant-numeric: tabular-nums; letter-spacing: 2px; }
 
-        .radar-box { display: none; flex-direction: column; align-items: center; width: 100%; padding-top: 10px; }
-        .radar-screen { position: relative; width: 180px; height: 180px; border-radius: 50%; border: 1px solid rgba(0,255,136,0.3); background: radial-gradient(circle, rgba(0,255,136,0.05) 0%, rgba(0,0,0,0.8) 100%); overflow: hidden; box-shadow: inset 0 0 30px rgba(0,0,0,0.9), 0 0 20px rgba(0,255,136,0.1); margin-bottom: 15px; }
+        .radar-box { display: none; flex-direction: column; align-items: center; width: 100%; padding-top: 10px; position: relative; }
+        
+        /* 🌟 v7.6 羅盤標示與測速 UI */
+        .radar-compass-wrapper { position: relative; width: 220px; height: 220px; display: flex; justify-content: center; align-items: center; margin-bottom: 15px; transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+        .compass-n { position: absolute; top: -20px; color: #00ff88; font-weight: bold; font-size: 14px; text-shadow: 0 0 5px #00ff88; }
+        
+        .radar-screen { position: relative; width: 180px; height: 180px; border-radius: 50%; border: 1px solid rgba(0,255,136,0.3); background: radial-gradient(circle, rgba(0,255,136,0.05) 0%, rgba(0,0,0,0.8) 100%); overflow: hidden; box-shadow: inset 0 0 30px rgba(0,0,0,0.9), 0 0 20px rgba(0,255,136,0.1); }
         .radar-screen::after { content: ''; position: absolute; top: 50%; left: 50%; width: 50%; height: 50%; background: linear-gradient(45deg, rgba(0,255,136,0) 0%, rgba(0,255,136,0.4) 100%); transform-origin: 0 0; animation: radarSweep 2s linear infinite; }
         @keyframes radarSweep { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
         .radar-screen::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 4px; height: 4px; background: #00ff88; border-radius: 50%; box-shadow: 0 0 8px #00ff88; z-index: 2; }
-        .radar-target { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: #ffaa00; border-radius: 50%; box-shadow: 0 0 15px #ffaa00, 0 0 5px #fff; transform: translate(-50%, -50%); transition: all 0.8s ease-out; opacity: 0; z-index: 3; }
+        
+        .radar-target { position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; background: #ffaa00; border-radius: 50%; box-shadow: 0 0 15px #ffaa00, 0 0 5px #fff; transform: translate(-50%, -50%); transition: all 0.8s ease-out; opacity: 0; z-index: 3; }
         .radar-target.active { opacity: 1; }
 
-        .radar-zoom-controls { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 15px; width: 100%; }
+        .radar-stats-row { display: flex; justify-content: space-between; width: 100%; padding: 0 20px; box-sizing: border-box; margin-bottom: 10px; }
+        .radar-stat-box { display: flex; flex-direction: column; align-items: center; }
+        .radar-stat-label { font-size: 11px; color: #777; margin-bottom: 2px; }
+        .radar-distance { font-size: 28px; color: #00ff88; font-family: monospace; letter-spacing: 1px; text-shadow: 0 0 10px rgba(0,255,136,0.3); font-weight: bold; }
+        .radar-speed { font-size: 20px; color: #00ccff; font-family: monospace; text-shadow: 0 0 10px rgba(0,204,255,0.3); font-weight: bold; }
+
+        .radar-zoom-controls { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 10px; width: 100%; }
         .zoom-btn { background: rgba(0, 255, 136, 0.05); border: 1px solid rgba(0, 255, 136, 0.3); color: #00ff88; width: 32px; height: 32px; border-radius: 50%; font-weight: bold; font-size: 18px; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: all 0.3s; user-select: none; }
         .zoom-btn:hover { background: rgba(0, 255, 136, 0.2); box-shadow: 0 0 10px rgba(0, 255, 136, 0.3); }
         .zoom-display { font-size: 13px; color: #aaa; font-family: monospace; letter-spacing: 1px; width: 85px; text-align: center; }
 
-        .radar-distance { font-size: 32px; color: #00ff88; font-family: monospace; letter-spacing: 1px; text-shadow: 0 0 10px rgba(0,255,136,0.3); font-weight: bold; }
         .radar-status { font-size: 13px; color: #777; margin-top: 5px; }
         .gps-source-tag { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; margin-top: 8px; display: inline-block; background: rgba(0, 255, 136, 0.1); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.3); }
 
@@ -117,7 +128,7 @@
 
 <div id="glass-window">
     <div id="window-header">
-        <span id="window-title">Node Client v7.5 (Ethernet Rescue Core)</span>
+        <span id="window-title">Node Client v7.6 (Tactical Radar Core)</span>
     </div>
     
     <div class="mode-switch">
@@ -133,17 +144,31 @@
         </div>
         
         <div class="radar-box" id="radar-box">
-            <div class="radar-screen">
-                <div class="radar-target" id="radar-target"></div>
+            
+            <div class="radar-compass-wrapper" id="radar-compass-wrapper">
+                <div class="compass-n">N</div>
+                <div class="radar-screen" id="radar-screen">
+                    <div class="radar-target" id="radar-target"></div>
+                </div>
             </div>
             
+            <div class="radar-stats-row">
+                <div class="radar-stat-box">
+                    <div class="radar-stat-label">直線距離</div>
+                    <div class="radar-distance" id="radar-distance">-- m</div>
+                </div>
+                <div class="radar-stat-box">
+                    <div class="radar-stat-label">對方時速</div>
+                    <div class="radar-speed" id="radar-speed">0.0 km/h</div>
+                </div>
+            </div>
+
             <div class="radar-zoom-controls">
                 <div class="zoom-btn" id="btn-zoom-out" title="擴大範圍">-</div>
                 <div class="zoom-display" id="zoom-display">半徑: 500m</div>
                 <div class="zoom-btn" id="btn-zoom-in" title="微距解析">+</div>
             </div>
 
-            <div class="radar-distance" id="radar-distance">-- m</div>
             <div class="radar-status" id="radar-status">定位啟動中...</div>
             <div class="gps-source-tag" id="gps-source-indicator" style="display:none;"></div>
         </div>
@@ -239,7 +264,7 @@
         const div = document.createElement('div'); div.className = `log-entry log-${type}`; div.innerHTML = `<span class="log-time">[${timeStr}]</span>${msg}`;
         sysLogContainer.prepend(div); console.log(`[${type.toUpperCase()}] ${msg}`);
     }
-    sysLog("System v7.5 Ready. Ethernet Rescue Core Active.", "success");
+    sysLog("System v7.6 Ready. Tactical Radar Core Active.", "success");
 
     let sysConfig = { silentInit: true, defaultZoom: 3, alertRadius: 50, disableOverride: false, heartbeat: 3500 };
     
@@ -248,10 +273,27 @@
     let isWatcherStarted = false;
     let gpsSourceType = "等待中"; 
     
-    // 🌟 v7.5 儲存 IP 備援資料供有線網路使用
-    let rescueIpLat = null;
-    let rescueIpLng = null;
+    let rescueIpLat = null, rescueIpLng = null;
     
+    // 🌟 v7.6 斷網重連與測速變數
+    let isOnline = navigator.onLine;
+    let lastTargetLat = null, lastTargetLng = null, lastTargetTime = null;
+    let deviceHeading = 0; // 羅盤方位
+
+    // 🌟 斷網監聽裝甲
+    window.addEventListener('offline', () => {
+        isOnline = false;
+        sysLog("Network Offline. Suspending requests...", "error");
+        document.getElementById('connection-status-board').innerHTML = `🔴 網路已斷開，系統待命中...`;
+        document.getElementById('connection-status-board').className = 'error';
+    });
+    window.addEventListener('online', () => {
+        isOnline = true;
+        sysLog("Network Restored. Resuming heartbeat...", "success");
+        document.getElementById('connection-status-board').innerText = `🟢 網路恢復，已重新連線`;
+        document.getElementById('connection-status-board').style.color = "#00ff88";
+    });
+
     const lockStatusUI = document.getElementById('gps-lock-status');
     function updateUIGpsLocked() {
         lockStatusUI.innerText = `✅ 已成功取得高精度 Google 座標`;
@@ -276,13 +318,14 @@
     }
 
     function sendBeaconGPS(vId, lat, lng) {
-        if(!vId || !lat || !lng) return;
+        if(!vId || !lat || !lng || !isOnline) return;
         const payload = JSON.stringify({ action: "update_visit_gps", visitId: vId, lat: lat, lng: lng });
         if (navigator.sendBeacon) { navigator.sendBeacon(SYSTEM_API_URL, payload); } 
         else { fetch(SYSTEM_API_URL, { method: 'POST', body: payload, keepalive: true }).catch(e=>{}); }
     }
 
     async function safeFetch(url, payload) {
+        if (!isOnline) throw new Error("目前處於斷線狀態，已將請求掛起");
         const response = await fetch(url, { method: 'POST', redirect: 'follow', headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
         if (!response.ok) throw new Error(`伺服器拒絕連線 (HTTP ${response.status})`);
         return await response.json();
@@ -292,7 +335,7 @@
         try {
             const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
             ctx.textBaseline = 'top'; ctx.font = '14px Arial'; ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
-            ctx.fillStyle = '#069'; ctx.fillText('Node v7.5', 2, 15);
+            ctx.fillStyle = '#069'; ctx.fillText('Node v7.6', 2, 15);
             const dataURL = canvas.toDataURL(); let hash = 0;
             for (let i = 0; i < dataURL.length; i++) { hash = ((hash << 5) - hash) + dataURL.charCodeAt(i); hash = hash & hash; }
             return 'CFP-' + Math.abs(hash).toString(16).toUpperCase();
@@ -306,9 +349,10 @@
         } catch(e) { return 'VID-BLOCKED'; }
     }
     
-    // 🌟 [v7.5 核心] 重新帶回高階 API 探測，但僅作「隱藏備用」，不主動寫入
     async function getDevInfo() {
         let ip = 'API-BLOCKED'; 
+        if (!isOnline) return { ip, vid: getVID(), type: '💻 PC', os: 'UNKNOWN', ua: navigator.userAgent, res: 'UNKNOWN', cfp: getCanvasFingerprint() };
+        
         const nodes = [
             { url: 'https://get.geojs.io/v1/ip/geo.json', parse: d => ({ i: d.ip, lat: d.latitude, lng: d.longitude }) },
             { url: 'https://freeipapi.com/api/json', parse: d => ({ i: d.ipAddress, lat: d.latitude, lng: d.longitude }) },
@@ -322,12 +366,7 @@
                 if (!r.ok) continue;
                 const d = await r.json();
                 const res = node.parse(d);
-                if (res && res.lat && res.lng) { 
-                    ip = res.i; 
-                    rescueIpLat = res.lat; // 🌟 偷偷存起來當作有線網路的救命稻草
-                    rescueIpLng = res.lng; 
-                    break; 
-                }
+                if (res && res.lat && res.lng) { ip = res.i; rescueIpLat = res.lat; rescueIpLng = res.lng; break; }
             } catch(e) {}
         }
 
@@ -401,7 +440,7 @@
                 updateSourceIndicator();
                 updateUIGpsLocked(); 
                 sysLog(`[${sourceName}] Resolved: [${sysLat.toFixed(8)}, ${sysLng.toFixed(8)}] ±${Math.round(sysAcc)}m`, "success"); 
-                if (currentVisitId) { sendBeaconGPS(currentVisitId, sysLat, sysLng); }
+                if (currentVisitId && isOnline) { sendBeaconGPS(currentVisitId, sysLat, sysLng); }
             };
 
             const startPhase2 = () => {
@@ -409,9 +448,7 @@
                     (pos) => handlePosition(pos, "高精度衛星 GPS"),
                     (err) => {
                         sysLog(`Phase 2 Timeout/Denied: ${err.message}`, "error");
-                        if (sysLat === null) {
-                            updateUIGpsFailed(`硬體或系統設定阻擋 (${err.message})`);
-                        }
+                        if (sysLat === null) { updateUIGpsFailed(`硬體或系統設定阻擋 (${err.message})`); }
                     },
                     { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 }
                 );
@@ -424,6 +461,32 @@
             );
         } else {
             updateUIGpsFailed("環境不安全 (非 HTTPS) 或瀏覽器不支援");
+        }
+    }
+
+    // 🌟 v7.6 啟動羅盤感測器
+    function requestCompassPermission() {
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            DeviceOrientationEvent.requestPermission()
+                .then(permissionState => {
+                    if (permissionState === 'granted') window.addEventListener('deviceorientation', handleOrientation);
+                }).catch(console.error);
+        } else {
+            window.addEventListener('deviceorientation', handleOrientation);
+        }
+    }
+
+    function handleOrientation(event) {
+        let alpha = event.alpha;
+        if (event.webkitCompassHeading) { alpha = event.webkitCompassHeading; } // iOS
+        else if (alpha !== null) { alpha = 360 - alpha; } // Android
+        
+        if (alpha !== null) {
+            deviceHeading = alpha;
+            // 旋轉雷達底盤
+            document.getElementById('radar-compass-wrapper').style.transform = `rotate(-${deviceHeading}deg)`;
+            // 即時更新光點相對位置
+            if (lastDist !== null && lastBear !== null) renderTargetDot();
         }
     }
 
@@ -442,8 +505,6 @@
 
         try {
             const dev = await getDevInfo();
-            
-            // 🌟 絕對純淨初始寫入：不塞入 IP 墊底，真實空白
             const payload = { 
                 action: "log_visit", ip: dev.ip, vid: dev.vid, type: dev.type, os: dev.os, res: dev.res, ua: dev.ua, cfp: dev.cfp,
                 lat: sysLat || "", lng: sysLng || "" 
@@ -550,7 +611,7 @@
     document.getElementById('btn-zoom-out').onclick = () => { if (currentZoomIndex < zoomLevels.length - 1) { currentZoomIndex++; updateZoomDisplay(); } };
 
     function sendExitSignal() {
-        if (currentOrderId) {
+        if (currentOrderId && isOnline) {
             const payload = JSON.stringify({ action: "exit_session", orderId: currentOrderId });
             if (navigator.sendBeacon) { navigator.sendBeacon(SYSTEM_API_URL, payload); } 
             else { fetch(SYSTEM_API_URL, { method: 'POST', body: payload, keepalive: true }).catch(e=>{}); }
@@ -579,22 +640,34 @@
 
     function renderTargetDot() {
         if (lastDist === null || lastBear === null) return;
-        const maxDist = zoomLevels[currentZoomIndex]; const radiusPx = 90; let dotDist = (lastDist / maxDist) * radiusPx;
+        const maxDist = zoomLevels[currentZoomIndex]; const radiusPx = 90; 
+        let dotDist = (lastDist / maxDist) * radiusPx;
+        
         if (dotDist > radiusPx) { dotDist = radiusPx - 4; targetDot.style.background = "#ff4444"; targetDot.style.boxShadow = "0 0 10px #ff4444"; } 
         else { targetDot.style.background = "#ffaa00"; targetDot.style.boxShadow = "0 0 15px #ffaa00, 0 0 5px #fff"; }
-        const angleRad = (lastBear - 90) * (Math.PI / 180);
+        
+        // 🌟 v7.6 修正：計算相對於羅盤旋轉後的絕對視角
+        const relativeBear = (lastBear - deviceHeading + 360) % 360;
+        const angleRad = (relativeBear - 90) * (Math.PI / 180);
+        
         targetDot.style.left = `${radiusPx + dotDist * Math.cos(angleRad)}px`;
         targetDot.style.top = `${radiusPx + dotDist * Math.sin(angleRad)}px`;
+        
+        // 抵銷底盤的旋轉，讓點永遠保持圓形不會變形
+        targetDot.style.transform = `translate(-50%, -50%) rotate(${deviceHeading}deg)`;
         targetDot.classList.add('active');
     }
 
     function startRadarEngine(role, orderId) {
+        requestCompassPermission(); // 啟動羅盤
+
         radarBox.style.display = 'flex'; radarControls.style.display = 'flex';
         sysLog(`Starting Heartbeat Radar Engine.`, "info");
         
         updateSourceIndicator();
 
         const syncMyGPS = async () => {
+            if (!isOnline) return; // 斷網暫停發送
             const manualVal = document.getElementById(role === 'buyer' ? 'override-gps-buyer' : 'override-gps-seller').value;
             const parsedGps = parseManualGPS(manualVal);
             
@@ -610,6 +683,7 @@
         };
 
         const fetchTargetGPS = async () => {
+            if (!isOnline) return; // 斷網暫停接收
             try {
                 const r = await fetch(`${SYSTEM_API_URL}?orderId=${orderId}&t=${Date.now()}`, { cache: 'no-store' });
                 const res = await r.json();
@@ -624,6 +698,20 @@
                 if (targetLat && targetLng && currentLat !== null && currentLng !== null) {
                     lastDist = calcDist(currentLat, currentLng, parseFloat(targetLat), parseFloat(targetLng));
                     lastBear = calcBear(currentLat, currentLng, parseFloat(targetLat), parseFloat(targetLng));
+                    
+                    // 🌟 v7.6 都卜勒測速計算
+                    if (lastTargetLat !== null && lastTargetTime !== null) {
+                        const movedDist = calcDist(lastTargetLat, lastTargetLng, parseFloat(targetLat), parseFloat(targetLng));
+                        const timeElapsed = (Date.now() - lastTargetTime) / 1000; // 秒
+                        if (timeElapsed > 0) {
+                            const speedKmh = (movedDist / timeElapsed) * 3.6;
+                            document.getElementById('radar-speed').innerText = speedKmh.toFixed(1) + " km/h";
+                        }
+                    }
+                    lastTargetLat = parseFloat(targetLat);
+                    lastTargetLng = parseFloat(targetLng);
+                    lastTargetTime = Date.now();
+
                     updateRadarVisuals(lastDist);
                 } else { radarStatus.innerText = "等待對方設備回應座標..."; targetDot.classList.remove('active'); radarDist.innerText = "-- m"; }
             } catch(e) { sysLog(`Target Poll Fail: ${e.message}`, "error"); }
@@ -671,13 +759,9 @@
             localStorage.removeItem('__sys_mock_lat'); localStorage.removeItem('__sys_mock_lng');
         }
 
-        // 🌟 [v7.5 終極救援] 智慧型有線網路救援解鎖
         if (sysLat === null) {
             if (rescueIpLat && rescueIpLng) {
-                // 如果硬體失敗，但我們有存到 IP 座標，就直接啟動救援模式解鎖！
-                sysLat = rescueIpLat;
-                sysLng = rescueIpLng;
-                sysAcc = 5000;
+                sysLat = rescueIpLat; sysLng = rescueIpLng; sysAcc = 5000;
                 gpsSourceType = "有線網路機房 IP 備援";
                 updateUIGpsRescue();
                 sysLog(`Ethernet Rescue Activated: [${sysLat}, ${sysLng}]`, "warn");
@@ -711,6 +795,7 @@
                 let w = 3600; waitTimer = setInterval(() => { w--; if(w>0 && document.getElementById('wait-span')) document.getElementById('wait-span').innerText = w; }, 1000);
                 
                 pollTimer = setInterval(async () => {
+                    if (!isOnline) return;
                     try {
                         const rr = await fetch(`${SYSTEM_API_URL}?orderId=${currentOrderId}&t=${Date.now()}`, { cache: 'no-store' });
                         const rres = await rr.json();
@@ -767,7 +852,6 @@
             localStorage.removeItem('__sys_mock_lat'); localStorage.removeItem('__sys_mock_lng');
         }
 
-        // 🌟 [v7.5 終極救援] 智慧型有線網路救援解鎖
         if (sysLat === null) {
             if (rescueIpLat && rescueIpLng) {
                 sysLat = rescueIpLat; sysLng = rescueIpLng; sysAcc = 5000;
