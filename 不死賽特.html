@@ -1,0 +1,572 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>不死賽特</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <style>
+        /* --- 全域變數與 3A 主題 --- */
+        :root {
+            --gold-base: #FFDF00; --gold-dark: #B8860B;
+            --skull-cyan: #00FFFF; --skull-dark: #004444; --tension-red: #FF0033;
+            --glass-bg: rgba(10, 15, 20, 0.85); --panel-bg: rgba(5, 5, 10, 0.9);
+            --text-main: #F8F8FF;
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100vw; height: 100vh;
+            background: #020205; font-family: "Segoe UI", sans-serif; color: var(--text-main);
+            overflow: hidden; user-select: none; perspective: 1500px;
+        }
+
+        /* 背景氣氛層 */
+        #ambient-bg {
+            position: absolute; top: -10%; left: -10%; width: 120%; height: 120%;
+            background: radial-gradient(circle at 50% 50%, #112233 0%, #05050A 60%, #000 100%);
+            z-index: 1; transition: filter 0.5s, transform 0.5s;
+        }
+        #particle-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; mix-blend-mode: screen; }
+
+        /* --- 3A 級動態縮放主容器 --- */
+        #app-wrapper {
+            position: relative; width: 100%; height: 100%; z-index: 10;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        #app-container {
+            width: 1100px; height: 800px; padding: 25px; box-sizing: border-box;
+            background: var(--glass-bg); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+            border: 2px solid var(--gold-dark); border-top: 2px solid var(--skull-cyan);
+            border-radius: 20px; box-shadow: 0 50px 100px rgba(0,0,0,0.9), inset 0 0 50px rgba(0,255,255,0.1);
+            display: flex; flex-direction: column; gap: 20px; position: relative;
+            transform-style: preserve-3d; transition: transform 0.1s ease-out;
+        }
+
+        /* --- 頂部資訊列 --- */
+        .header-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(0,0,0,0.7); padding: 15px 25px; border-radius: 15px;
+            border: 1px solid rgba(0,255,255,0.2); z-index: 20; flex-shrink: 0;
+            transform: translateZ(30px);
+        }
+        .header-left { display: flex; align-items: center; gap: 15px; }
+        .icon-btn { font-size: 38px; cursor: pointer; transition: 0.3s; filter: drop-shadow(0 0 5px var(--skull-cyan)); }
+        .icon-btn:hover { transform: scale(1.1) rotate(15deg); filter: drop-shadow(0 0 15px var(--skull-cyan)); }
+        
+        .header-center { display: flex; flex-direction: column; align-items: center; }
+        .member-status { font-size: 16px; color: #888; font-weight: bold; }
+        .member-status.active { color: var(--skull-cyan); text-shadow: 0 0 10px var(--skull-cyan); }
+        .balance-display {
+            font-size: 36px; font-weight: 900; background: linear-gradient(to bottom, #FFF, var(--gold-base));
+            -webkit-background-clip: text; color: transparent; text-shadow: 0 0 20px rgba(255,223,0,0.6); font-variant-numeric: tabular-nums;
+        }
+
+        .btn {
+            padding: 12px 25px; font-size: 18px; font-weight: bold; border-radius: 8px;
+            cursor: pointer; transition: 0.2s; border: 2px solid transparent; text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+        .btn-gold { background: linear-gradient(180deg, #D4AF37, #8B6508); border-color: #FFDF00; color: #000; }
+        .btn-gold:hover { background: linear-gradient(180deg, #FFDF00, #B8860B); box-shadow: 0 0 20px rgba(255,223,0,0.6); transform: translateY(-2px); }
+        .btn-blue { background: linear-gradient(180deg, #008B8B, #004040); border-color: #00FFFF; color: #FFF; }
+        .btn-blue:hover { background: linear-gradient(180deg, #00FFFF, #008B8B); box-shadow: 0 0 20px rgba(0,255,255,0.6); color: #000; transform: translateY(-2px); }
+        .btn-red { background: linear-gradient(180deg, #8B0000, #400000); border-color: #FF3333; color: #FFF; }
+        .btn-red:hover { background: linear-gradient(180deg, #FF3333, #8B0000); box-shadow: 0 0 20px rgba(255,51,51,0.6); transform: translateY(-2px); }
+
+        /* --- 絕對定位視圖切換器 --- */
+        #view-wrapper { position: relative; flex: 1; width: 100%; height: 100%; min-height: 0; transform-style: preserve-3d; }
+        .view-panel {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; opacity: 0; transform: scale(0.95); pointer-events: none; transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .view-active { opacity: 1; transform: scale(1); pointer-events: auto; z-index: 10; }
+        #dashboard-view { flex-direction: row; gap: 20px; }
+        #game-view { flex-direction: column; gap: 15px; }
+
+        /* 儀表板面板 */
+        .dash-panel {
+            background: var(--panel-bg); border: 1px solid rgba(0,255,255,0.15); border-radius: 15px;
+            padding: 20px; flex: 1; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: inset 0 5px 20px rgba(0,0,0,0.8);
+        }
+        .panel-title { font-size: 20px; font-weight: bold; color: var(--gold-base); border-bottom: 1px solid rgba(255,223,0,0.2); padding-bottom: 10px; margin-bottom: 15px; flex-shrink: 0; }
+        .sys-log-container { color:#AAA; font-family:monospace; line-height:1.6; overflow-y:auto; flex: 1; padding-right: 10px; }
+        .sys-log-container::-webkit-scrollbar { width: 6px; }
+        .sys-log-container::-webkit-scrollbar-thumb { background: var(--skull-dark); border-radius: 3px; }
+
+        /* --- 遊戲拉霸盤面 (3A 視覺) --- */
+        #grid-board {
+            flex: 1; background: rgba(0,0,0,0.7); border-radius: 15px; padding: 10px;
+            display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;
+            box-shadow: inset 0 0 40px #000; border: 1px solid rgba(255,255,255,0.05);
+            position: relative; overflow: hidden; transform: translateZ(20px); transition: transform 0.5s;
+        }
+
+        /* 運鏡特效：鏡頭拉近 */
+        .camera-zoom { transform: translateZ(80px) scale(1.05) !important; box-shadow: 0 0 50px rgba(255,0,51,0.3) !important; }
+
+        /* 輪軸容器 (Tension 聽牌特效) */
+        .reel-column { display: flex; flex-direction: column; gap: 8px; position: relative; }
+        .reel-column.teasing::after {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(180deg, rgba(255,0,51,0), rgba(255,0,51,0.5), rgba(255,0,51,0));
+            animation: teasePulse 0.4s infinite alternate; pointer-events: none; border-radius: 10px;
+            box-shadow: 0 0 30px var(--tension-red); z-index: 5; mix-blend-mode: screen;
+        }
+        @keyframes teasePulse { 0% { opacity: 0.5; } 100% { opacity: 1; transform: scaleX(1.1); } }
+
+        /* 符號區塊 */
+        .grid-cell {
+            flex: 1; background: linear-gradient(135deg, #111, #050505);
+            border: 1px solid rgba(0,255,255,0.2); border-radius: 12px;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 50px; position: relative; box-shadow: inset 0 0 15px rgba(0,0,0,1);
+            transform-style: preserve-3d; perspective: 500px;
+        }
+        
+        /* 材質貼圖層 */
+        .symbol-texture { width: 100%; height: 100%; object-fit: contain; }
+        
+        .symbol-inner { filter: drop-shadow(0 10px 10px rgba(0,0,0,0.8)); transform: translateZ(20px); transition: 0.2s; display: flex; justify-content: center; align-items: center; width: 90px; height: 90px;}
+        .sym-mult { color: #FFF; font-weight: 900; font-size: 38px; text-shadow: 0 0 20px #FF3333, 0 0 40px #FF0000; }
+        
+        /* 動態衝擊波掉落 */
+        .anim-drop { animation: epicDrop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; opacity: 0; transform: translateY(-200px) scaleY(1.5); }
+        @keyframes epicDrop { 0% { transform: translateY(-200px) scaleY(1.5); opacity: 0; } 60% { transform: translateY(20px) scaleY(0.8); opacity: 1; } 100% { transform: translateY(0) scaleY(1); opacity: 1; } }
+
+        .shockwave {
+            position: absolute; top: 50%; left: 50%; width: 10px; height: 10px;
+            background: rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%);
+            animation: wave 0.4s ease-out forwards; pointer-events: none; z-index: 10;
+        }
+        @keyframes wave { 0% { width: 10px; height: 10px; opacity: 1; } 100% { width: 150px; height: 150px; opacity: 0; box-shadow: 0 0 30px #FFF; } }
+
+        /* 3A 符號 3D 翻轉與後處理色差 */
+        .anim-win-flip { animation: flip3D 0.7s ease-in-out forwards; z-index: 20; }
+        @keyframes flip3D {
+            0% { transform: translateZ(20px) rotateY(0deg); }
+            50% { transform: translateZ(80px) rotateY(180deg) scale(1.4); filter: brightness(2) drop-shadow(0 0 20px #FFF); }
+            100% { transform: translateZ(20px) rotateY(360deg) scale(1); opacity: 0; }
+        }
+
+        .aberration { animation: rgbSplit 0.3s ease-out; }
+        @keyframes rgbSplit {
+            0% { text-shadow: -8px 0 red, 8px 0 cyan; transform: scale(1.02); filter: blur(2px); }
+            100% { text-shadow: 0 0 transparent; transform: scale(1); filter: blur(0); }
+        }
+
+        /* 遊戲控制區 */
+        .game-controls { display: flex; gap: 15px; flex-shrink: 0; height: 70px; transform: translateZ(30px); }
+        .btn-epic {
+            flex: 1; background: linear-gradient(180deg, #00FFFF, #006666);
+            border: 2px solid #FFF; border-radius: 15px; color: #000;
+            font-size: 26px; font-weight: 900; cursor: pointer;
+            box-shadow: 0 15px 30px rgba(0,255,255,0.3), inset 0 5px 15px rgba(255,255,255,0.8);
+            text-transform: uppercase; letter-spacing: 3px; transition: 0.2s; position: relative; overflow: hidden;
+        }
+        .btn-epic::after {
+            content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+            background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,0.6), rgba(255,255,255,0));
+            transform: rotate(45deg); animation: btnSweep 3s infinite; pointer-events: none;
+        }
+        @keyframes btnSweep { 0% { transform: translateX(-100%) rotate(45deg); } 100% { transform: translateX(100%) rotate(45deg); } }
+        .btn-epic:hover { transform: translateY(-5px); box-shadow: 0 20px 40px rgba(0,255,255,0.5), inset 0 5px 20px #FFF; }
+        .btn-epic:active { transform: translateY(2px); box-shadow: 0 5px 10px rgba(0,255,255,0.5); }
+        .btn-epic:disabled { filter: grayscale(1); cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-epic-red { background: linear-gradient(180deg, #FF3333, #8B0000); box-shadow: 0 15px 30px rgba(255,51,51,0.3), inset 0 5px 15px rgba(255,255,255,0.8); color:#FFF; }
+
+        /* 特效畫布層 (彈跳金幣) */
+        #front-fx-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; border-radius: 20px;}
+        
+        /* 神級大獎全螢幕字體 */
+        #epic-win-text {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0);
+            font-size: 150px; font-weight: 900; color: #FFF; pointer-events: none; z-index: 200;
+            text-shadow: 0 0 50px #FF8C00, 0 0 100px #FF0000; opacity: 0; transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            background: linear-gradient(to bottom, #FFF, #FFDF00); -webkit-background-clip: text; color: transparent;
+        }
+        #epic-win-text.show { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+
+        /* --- 彈出視窗 (Modal) --- */
+        .modal-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); backdrop-filter: blur(5px); z-index: 300;
+            display: none; justify-content: center; align-items: center; border-radius: 20px;
+        }
+        .modal-box {
+            background: linear-gradient(180deg, rgba(20,30,40,0.95), rgba(5,10,15,0.95));
+            border: 2px solid var(--skull-cyan); border-radius: 15px; padding: 30px;
+            width: 400px; box-shadow: 0 0 50px rgba(0,255,255,0.3); text-align: center;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        .input-group label { display: block; color: var(--skull-cyan); margin-bottom: 5px; font-weight: bold; }
+        .input-group input { width: 100%; padding: 10px; background: #000; border: 1px solid var(--skull-dark); box-sizing: border-box; color: #FFF; border-radius: 5px; font-size: 16px; outline: none; }
+        .input-group input:focus { border-color: var(--skull-cyan); box-shadow: 0 0 10px rgba(0,255,255,0.5); }
+        .modal-btns { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+
+        /* 螢幕震動 */
+        .shake-anim { animation: screenShake 0.4s both; }
+        .shake-heavy { animation: screenShakeHeavy 0.5s both; }
+        @keyframes screenShake { 10%, 90% { transform: translate3d(-5px, 3px, 0); } 20%, 80% { transform: translate3d(5px, -3px, 0); } 30%, 50%, 70% { transform: translate3d(-8px, 5px, 0); } }
+        @keyframes screenShakeHeavy { 10%, 90% { transform: translate3d(-10px, 8px, 0) scale(1.02); } 20%, 80% { transform: translate3d(10px, -8px, 0) scale(1.02); } 30%, 50%, 70% { transform: translate3d(-15px, 12px, 0) scale(1.04); } }
+    </style>
+</head>
+<body>
+
+<canvas id="particle-canvas"></canvas>
+<div id="ambient-bg"></div>
+
+<div id="app-wrapper">
+    <div id="app-container">
+        
+        <canvas id="front-fx-canvas"></canvas>
+        <div id="epic-win-text">MEGA WIN</div>
+
+        <div class="header-bar">
+            <div class="header-left">
+                <span class="icon-btn" onclick="openLoginModal()" title="會員登入">💀</span>
+                <span class="icon-btn" onclick="openSettingsModal()" title="系統設定">⚙️</span>
+            </div>
+            <div class="header-center">
+                <div id="user-status" class="member-status">未登入 (點擊💀登入)</div>
+                <div id="balance" class="balance-display">$0</div>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button class="btn btn-gold" onclick="triggerTopup()">💎 華麗儲值</button>
+                <button class="btn btn-blue" id="btn-enter-game" style="display:none;" onclick="openRuleModal()">🚪 進入神殿</button>
+                <button class="btn btn-red" id="btn-exit-game" style="display:none;" onclick="exitGame()">🔙 返回軍團</button>
+            </div>
+        </div>
+
+        <div id="view-wrapper">
+            <div id="dashboard-view" class="view-panel view-active">
+                <div class="dash-panel">
+                    <div class="panel-title">☠️ 不死賽特 通告</div>
+                    <div style="color:#CCC; line-height:1.8; overflow-y:auto; padding-right:10px;">
+                        <p>▶ 歡迎來到 <strong style="color:var(--skull-cyan);">「不死賽特」</strong> 3A 終極系統。</p>
+                        <p>▶ 管理員測試帳號: <span style="color:var(--skull-cyan); font-weight:bold;">admin</span> / 密碼: <span style="color:var(--skull-cyan); font-weight:bold;">admin</span></p>
+                        <p>▶ <strong style="color:var(--gold-base);">V1.2 更新：</strong> 完整實體圖形資產實裝，搭載「賽特骷髏金幣」！</p>
+                        <p>▶ 內建 AudioContext 合成音效與 Parallax 空間運算。</p>
+                        <p>▶ 登入後即可解鎖神殿模式，請務必開啟系統音量！</p>
+                    </div>
+                </div>
+                <div class="dash-panel">
+                    <div class="panel-title">📜 玩家動態與系統日誌</div>
+                    <div id="sys-log" class="sys-log-container">
+                        [系統] 不死賽特 終極渲染引擎已啟用。<br>
+                        [系統] 特效與音效資源就緒。<br>
+                        [系統] 等待連線...
+                    </div>
+                </div>
+            </div>
+
+            <div id="game-view" class="view-panel">
+                <div id="grid-board">
+                    </div>
+                <div class="game-controls">
+                    <button class="btn-epic" id="btn-spin" onclick="gameApp.spin()">⚡ WebGL 爆發 (SPIN)</button>
+                    <button class="btn-epic btn-epic-red" id="btn-auto" onclick="gameApp.toggleAuto()">🔄 自動連爆</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="login-modal" class="modal-overlay">
+            <div class="modal-box">
+                <div class="panel-title" style="border:none; text-align:center; font-size:24px;">💀 不死賽特 驗證</div>
+                <div class="input-group">
+                    <label>帳號 (Account)</label>
+                    <input type="text" id="acc-input" placeholder="請輸入 admin">
+                </div>
+                <div class="input-group">
+                    <label>密碼 (Password)</label>
+                    <input type="password" id="pwd-input" placeholder="請輸入 admin">
+                </div>
+                <div class="modal-btns">
+                    <button class="btn btn-blue" onclick="doLogin()">登入解鎖音效</button>
+                    <button class="btn btn-red" onclick="closeModal('login-modal')">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="settings-modal" class="modal-overlay">
+            <div class="modal-box">
+                <div class="panel-title" style="border:none; text-align:center; font-size:24px;">⚙️ 系統設定</div>
+                <p style="color:#CCC;">3A 級選項配置</p>
+                <div class="input-group">
+                    <label>螢幕刷新率</label>
+                    <select style="width:100%; padding:10px; background:#000; color:#FFF; border:1px solid var(--skull-cyan); border-radius:5px;">
+                        <option>60 HZ (標準)</option>
+                        <option selected>144 HZ (電競)</option>
+                    </select>
+                </div>
+                <div class="modal-btns">
+                    <button class="btn btn-blue" onclick="closeModal('settings-modal')">確認</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="rule-modal" class="modal-overlay">
+            <div class="modal-box" style="width: 500px;">
+                <div class="panel-title" style="border:none; text-align:center; font-size:26px;">📜 選擇神殿法則</div>
+                <p style="color:#CCC; margin-bottom: 20px;">進入 不死賽特 終極聲光連動模式：</p>
+                <div style="display:flex; flex-direction:column; gap:15px;">
+                    <button class="btn btn-gold" onclick="enterGame('終極旗艦視角')">🌟 【終極旗艦模式】資產實裝與 3D 運鏡</button>
+                </div>
+                <button class="btn" style="margin-top:20px; background:#333; color:#FFF;" onclick="closeModal('rule-modal')">返回</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ==========================================
+    // 模組一：3A Web Audio 合成引擎
+    // ==========================================
+    class AudioEngine {
+        constructor() {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            this.masterGain = this.ctx.createGain();
+            this.masterGain.gain.value = 0.2;
+            this.masterGain.connect(this.ctx.destination);
+            this.isUnlocked = false;
+        }
+        unlock() { if(this.ctx.state === 'suspended') this.ctx.resume(); this.isUnlocked = true; }
+        playTone(freq, type, duration, vol=0.5, slide=false) {
+            if(!this.isUnlocked) return;
+            const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+            osc.type = type; osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            if(slide) osc.frequency.exponentialRampToValueAtTime(freq*0.5, this.ctx.currentTime + duration);
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+            osc.connect(gain); gain.connect(this.masterGain); osc.start(); osc.stop(this.ctx.currentTime + duration);
+        }
+        playSpin() { this.playTone(100, 'sawtooth', 0.6, 0.1); }
+        playDrop() { this.playTone(60, 'square', 0.3, 0.2, true); }
+        playWin() { this.playTone(523.25, 'sine', 0.8, 0.2); setTimeout(()=>this.playTone(659.25, 'sine', 0.8, 0.2), 50); setTimeout(()=>this.playTone(783.99, 'sine', 1.0, 0.2), 100); }
+        playTension() { this.playTone(40, 'sawtooth', 0.8, 0.4); }
+        playCoin() { this.playTone(1200 + Math.random()*400, 'triangle', 0.1, 0.05); }
+    }
+    const audioX = new AudioEngine();
+
+    // ==========================================
+    // 模組二：3D 互動視覺與 Parallax Tilt
+    // ==========================================
+    const appWrapper = document.getElementById('app-wrapper');
+    const appContainer = document.getElementById('app-container');
+    function autoScale() {
+        const scale = Math.min(window.innerWidth / 1100, window.innerHeight / 800) * 0.96;
+        appContainer.style.transform = `scale(${scale})`; appContainer.style.transformOrigin = 'center center';
+    }
+    window.addEventListener('resize', autoScale); autoScale();
+
+    appWrapper.addEventListener('mousemove', (e) => {
+        if(!appContainer.style.transform.includes('scale')) return;
+        const scaleStr = appContainer.style.transform.match(/scale\(([^)]+)\)/)[1];
+        const xAxis = (window.innerWidth / 2 - e.pageX) / 50; 
+        const yAxis = (window.innerHeight / 2 - e.pageY) / 50;
+        appContainer.style.transform = `scale(${scaleStr}) rotateY(${xAxis}deg) rotateX(${yAxis}deg)`;
+    });
+    appWrapper.addEventListener('mouseleave', () => autoScale());
+
+    // ==========================================
+    // 模組三：雙層物理粒子系統
+    // ==========================================
+    const bgCanvas = document.getElementById('particle-canvas'); const bgCtx = bgCanvas.getContext('2d');
+    const fgCanvas = document.getElementById('front-fx-canvas'); const fgCtx = fgCanvas.getContext('2d');
+    let bgParticles = []; let fgParticles = [];
+    function resizeCanvas() { bgCanvas.width = window.innerWidth; bgCanvas.height = window.innerHeight; fgCanvas.width = appContainer.clientWidth; fgCanvas.height = appContainer.clientHeight; }
+    window.addEventListener('resize', resizeCanvas); resizeCanvas();
+    for(let i=0; i<80; i++) bgParticles.push({ x:Math.random()*window.innerWidth, y:Math.random()*window.innerHeight, vx:(Math.random()-0.5)*0.5, vy:-Math.random()*1.5-0.5, size:Math.random()*3+1, alpha:Math.random()*0.5+0.1, color:Math.random()>0.8?'#00FFFF':'#FFDF00' });
+    function spawnCoins(x, y, amount, isEpic = false) { for(let i=0; i<amount; i++) fgParticles.push({ x:x, y:y, vx:(Math.random()-0.5)*(isEpic?40:20), vy:(Math.random()-1)*(isEpic?40:20)-10, size:Math.random()*10+8, gravity:1.2, bounce:-0.6, life:1, color:isEpic?'#FFFFFF':'#FFDF00', type:isEpic?'gem':'coin' }); }
+    function renderParticles() { bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height); bgParticles.forEach(p => { p.x += p.vx; p.y += p.vy; if(p.y < 0) { p.y = bgCanvas.height; p.x = Math.random() * bgCanvas.width; } bgCtx.globalAlpha = p.alpha; bgCtx.fillStyle = p.color; bgCtx.beginPath(); bgCtx.arc(p.x, p.y, p.size, 0, Math.PI*2); bgCtx.fill(); }); fgCtx.clearRect(0, 0, fgCanvas.width, fgCanvas.height); for(let i = fgParticles.length - 1; i >= 0; i--) { let p = fgParticles[i]; p.vy += p.gravity; p.x += p.vx; p.y += p.vy; if(p.y > fgCanvas.height - p.size) { p.y = fgCanvas.height - p.size; p.vy *= p.bounce; p.vx *= 0.8; if(Math.abs(p.vy) > 2) audioX.playCoin(); } p.life -= 0.005; if(p.life <= 0) { fgParticles.splice(i, 1); continue; } fgCtx.globalAlpha = p.life; if(p.type === 'coin') { fgCtx.fillStyle = '#FFD700'; fgCtx.beginPath(); fgCtx.arc(p.x, p.y, p.size, 0, Math.PI*2); fgCtx.fill(); fgCtx.strokeStyle = '#B8860B'; fgCtx.lineWidth = 2; fgCtx.stroke(); } else { fgCtx.fillStyle = p.color; fgCtx.shadowBlur = 20; fgCtx.shadowColor = p.color; fgCtx.beginPath(); fgCtx.arc(p.x, p.y, p.size, 0, Math.PI*2); fgCtx.fill(); fgCtx.shadowBlur = 0; } } fgCtx.globalAlpha = 1; requestAnimationFrame(renderParticles); }
+    renderParticles();
+
+    // ==========================================
+    // 模組四：不死賽特 系統 UI 邏輯
+    // ==========================================
+    let isLoggedIn = false; let balance = 0;
+    function logSys(msg) { document.getElementById('sys-log').innerHTML = `[${new Date().toLocaleTimeString('zh-TW', {hour12:false})}] ${msg}<br>` + document.getElementById('sys-log').innerHTML; }
+    function updateBalance(amount) {
+        balance += amount; const el = document.getElementById('balance'); const start = parseInt(el.innerText.replace(/\$|,/g, '')) || 0; const change = balance - start; const startTime = performance.now();
+        const animate = (time) => { const progress = Math.min((time - startTime) / 1000, 1); const ease = 1 - Math.pow(1 - progress, 3); el.innerText = "$" + Math.floor(start + change * ease).toLocaleString(); if(progress < 1) requestAnimationFrame(animate); else el.innerText = "$" + balance.toLocaleString(); };
+        requestAnimationFrame(animate);
+    }
+    function openLoginModal() { if(!isLoggedIn) document.getElementById('login-modal').style.display = 'flex'; }
+    function openSettingsModal() { document.getElementById('settings-modal').style.display = 'flex'; }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+    function openRuleModal() { document.getElementById('rule-modal').style.display = 'flex'; }
+
+    function doLogin() {
+        if(document.getElementById('acc-input').value === 'admin' && document.getElementById('pwd-input').value === 'admin') {
+            isLoggedIn = true; audioX.unlock(); closeModal('login-modal');
+            document.getElementById('user-status').innerText = "🔱 管理員 Admin (在線)";
+            document.getElementById('user-status').classList.add('active');
+            document.getElementById('btn-enter-game').style.display = 'block';
+            updateBalance(15280); logSys("<span style='color:#00FFFF'>[驗證成功] 不死賽特 系統品牌已鎖定。</span>"); audioX.playWin();
+        } else alert("帳號或密碼錯誤！(提示: admin/admin)");
+    }
+    function triggerTopup() { if(!isLoggedIn) return alert("請先登入！"); updateBalance(1000); audioX.playCoin(); logSys("<span style='color:#FFDF00'>[儲值] 成功獲得 $1,000</span>"); }
+    function exitGame() { document.getElementById('game-view').classList.remove('view-active'); setTimeout(() => { document.getElementById('dashboard-view').classList.add('view-active'); document.getElementById('btn-enter-game').style.display = 'block'; document.getElementById('btn-exit-game').style.display = 'none'; }, 500); }
+    function enterGame(mode) {
+        closeModal('rule-modal'); logSys(`<span style='color:#FFDF00'>[系統] 載入 ${mode}...</span>`);
+        appContainer.classList.add('aberration'); setTimeout(() => appContainer.classList.remove('aberration'), 300);
+        document.getElementById('dashboard-view').classList.remove('view-active');
+        setTimeout(() => {
+            document.getElementById('game-view').classList.add('view-active');
+            document.getElementById('btn-enter-game').style.display = 'none';
+            document.getElementById('btn-exit-game').style.display = 'block';
+            if(!gameApp) gameApp = new EpicSlot();
+        }, 500);
+    }
+
+    // ==========================================
+    // 模組五：★ 3A 旗艦引擎 (包含金幣實體化) ★
+    // ==========================================
+    class EpicSlot {
+        constructor() {
+            this.rows = 5; this.cols = 6;
+            this.symbols = ['🟢', '🔵', '🟣', '🔴', '🏆', '💍', '⏳', '👑'];
+            this.multipliers = [2, 3, 5, 10, 25, 50, 100];
+            this.scatter = '👁️‍🗨️'; this.bet = 100;
+            this.cells = [];
+            this.initBoard();
+        }
+
+        initBoard() {
+            const board = document.getElementById('grid-board'); board.innerHTML = '';
+            for(let c=0; c<this.cols; c++) {
+                let colDiv = document.createElement('div'); colDiv.className = 'reel-column';
+                let colCells = [];
+                for(let r=0; r<this.rows; r++) {
+                    let cell = document.createElement('div'); cell.className = 'grid-cell';
+                    let inner = document.createElement('div'); inner.className = 'symbol-inner';
+                    cell.appendChild(inner); colDiv.appendChild(cell); colCells.push(inner);
+                }
+                board.appendChild(colDiv); this.cells.push(colCells);
+            }
+        }
+
+        // ★ 核心升級：實體材質貼圖映射 ★
+        createSymbolAsset(sym) {
+            // scatter 使用不死賽特骷髏金幣 (image_0.png)
+            if(sym === this.scatter) {
+                const img = document.createElement('img');
+                img.src = 'image_0.png'; // 實裝金幣貼圖
+                img.className = 'symbol-texture';
+                img.alt = '不死賽特金幣';
+                return img;
+            }
+            // 倍數球使用 3A 霓虹質感
+            if(sym.startsWith('x')) {
+                const span = document.createElement('span'); span.className = 'sym-mult'; span.innerText = sym;
+                return span;
+            }
+            // 其他符號使用材質 Emoji (模擬 3D 資產)
+            const span = document.createElement('span'); span.innerText = sym;
+            span.style.filter = "drop-shadow(0 0 10px rgba(255,255,255,0.4))"; // 模擬反光
+            return span;
+        }
+
+        generateGrid() {
+            let grid = [];
+            for(let c=0; c<this.cols; c++) {
+                let col = [];
+                for(let r=0; r<this.rows; r++) {
+                    const rnd = Math.random();
+                    if(rnd < 0.035) col.push(this.scatter);
+                    else if(rnd < 0.08) col.push(`x${this.multipliers[Math.floor(Math.random()*this.multipliers.length)]}`);
+                    else col.push(this.symbols[Math.floor(Math.random()*this.symbols.length)]);
+                }
+                grid.push(col);
+            }
+            return grid;
+        }
+
+        async spin() {
+            if(balance < this.bet) return alert("能量不足！");
+            document.getElementById('btn-spin').disabled = true;
+            updateBalance(-this.bet); audioX.playSpin();
+            const grid = this.generateGrid(); let currentScatters = 0;
+            const reels = document.querySelectorAll('.reel-column');
+
+            for(let c=0; c<this.cols; c++) {
+                // --- ★ 3A 聽牌運鏡與音效 ★ ---
+                if(currentScatters >= 3 && c >= 4) {
+                    reels[c].classList.add('teasing');
+                    document.getElementById('ambient-bg').style.filter = 'brightness(0.3) sepia(1) hue-rotate(-50deg)';
+                    document.getElementById('grid-board').classList.add('camera-zoom');
+                    audioX.playTension();
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                for(let r=0; r<this.rows; r++) {
+                    const val = grid[c][r]; if(val === this.scatter) currentScatters++;
+                    const cell = this.cells[c][r].parentElement; const inner = this.cells[c][r];
+                    inner.classList.remove('anim-win-flip'); // 重置 3D 翻轉
+                    inner.innerHTML = '';
+                    inner.appendChild(this.createSymbolAsset(val)); // 掛載實體資產
+                    cell.classList.remove('anim-drop'); void cell.offsetWidth; cell.classList.add('anim-drop');
+                    setTimeout(() => {
+                        let wave = document.createElement('div'); wave.className = 'shockwave'; cell.appendChild(wave); setTimeout(()=>wave.remove(), 400);
+                        if(r === this.rows-1) audioX.playDrop(); 
+                    }, 500);
+                }
+                await new Promise(r => setTimeout(r, 150));
+            }
+            reels.forEach(r => r.classList.remove('teasing')); document.getElementById('ambient-bg').style.filter = 'none'; document.getElementById('grid-board').classList.remove('camera-zoom');
+            await new Promise(r => setTimeout(r, 800)); this.evaluate(grid);
+        }
+
+        async evaluate(grid) {
+            let counts = {}; let mults = []; let scatters = 0; let winData = [];
+            for(let c=0; c<this.cols; c++) for(let r=0; r<this.rows; r++) {
+                const sym = grid[c][r]; if(sym === this.scatter) scatters++; else if(sym.startsWith('x')) mults.push(parseInt(sym.substring(1))); else { if(!counts[sym]) counts[sym] = {count:0, pos:[]}; counts[sym].count++; counts[sym].pos.push({c,r}); }
+            }
+            let baseWin = 0; for(const [sym, data] of Object.entries(counts)) { if(data.count >= 8) { const w = (data.count - 7) * 40; winData.push({sym, win:w, pos:data.pos}); baseWin += w; } }
+            const totalMult = mults.length ? mults.reduce((a,b)=>a+b, 0) : 1; const finalWin = baseWin > 0 ? baseWin * totalMult : 0;
+
+            if(winData.length > 0) {
+                audioX.playWin();
+                appContainer.classList.add('aberration'); setTimeout(() => appContainer.classList.remove('aberration'), 300);
+                winData.forEach(w => {
+                    w.pos.forEach(p => {
+                        const inner = this.cells[p.c][p.r];
+                        inner.classList.add('anim-win-flip'); // 3A 級 3D 翻轉消除
+                        const rect = inner.parentElement.getBoundingClientRect(); const fgRect = fgCanvas.getBoundingClientRect();
+                        spawnCoins(rect.left - fgRect.left + rect.width/2, rect.top - fgRect.top + rect.height/2, 10);
+                    });
+                });
+                await new Promise(r => setTimeout(r, 700));
+            }
+
+            if(finalWin > 0) {
+                updateBalance(finalWin);
+                if(finalWin >= this.bet * 50) {
+                    document.getElementById('app-container').classList.add('shake-heavy');
+                    setTimeout(()=>document.getElementById('app-container').classList.remove('shake-heavy'), 500);
+                    const epicText = document.getElementById('epic-win-text');
+                    epicText.innerText = finalWin >= this.bet * 100 ? "GOD TIER WIN!" : "MEGA WIN!";
+                    epicText.classList.add('show'); spawnCoins(fgCanvas.width/2, fgCanvas.height/2, 100, true);
+                    await new Promise(r => setTimeout(r, 2500)); epicText.classList.remove('show');
+                }
+            }
+            if(scatters >= 4) {
+                audioX.playWin(); audioX.playWin();
+                logSys(`<span style='color:#FF00FF; font-weight:bold;'>[爆發] 獲得 ${scatters} 顆不死賽特之眼！進入免遊！</span>`);
+                document.getElementById('epic-win-text').innerText = "FREE SPINS!"; document.getElementById('epic-win-text').classList.add('show');
+                document.getElementById('ambient-bg').style.background = "radial-gradient(circle at 50% 50%, #440000 0%, #110000 60%, #000 100%)";
+                spawnCoins(fgCanvas.width/2, fgCanvas.height/2, 80, true);
+                await new Promise(r => setTimeout(r, 3000)); document.getElementById('epic-win-text').classList.remove('show');
+            }
+            document.getElementById('btn-spin').disabled = false;
+        }
+
+        toggleAuto() {
+            if(this.autoTimer) { clearInterval(this.autoTimer); this.autoTimer = null; document.getElementById('btn-auto').innerText = '🔄 自動連爆'; } else { document.getElementById('btn-auto').innerText = '⏹️ 停止連爆'; this.spin(); this.autoTimer = setInterval(() => { if(!document.getElementById('btn-spin').disabled) this.spin(); }, 2500); }
+        }
+    }
+    let gameApp = null;
+</script>
+</body>
+</html>
